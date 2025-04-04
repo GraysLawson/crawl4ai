@@ -44,7 +44,7 @@ services:
           memory: 1G
           devices:
             - driver: nvidia
-              device_ids: ['0'] # Or your UUID/count:all
+              count: 1
               capabilities: [gpu]
 
 # Define the network if deploying this standalone,
