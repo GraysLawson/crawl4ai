@@ -1,65 +1,58 @@
-# Base configuration (not a service, just a reusable config block)
-x-base-config: &base-config
-  ports:
-    - "11235:11235"
-    - "8000:8000"
-    - "9222:9222"
-    - "8080:8080"
-  environment:
-    - CRAWL4AI_API_TOKEN=${CRAWL4AI_API_TOKEN:-}
-    - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-    - CLAUDE_API_KEY=${CLAUDE_API_KEY:-}
-  volumes:
-    - /dev/shm:/dev/shm
-  deploy:
-    resources:
-      limits:
-        memory: 4G
-      reservations:
-        memory: 1G
-  restart: unless-stopped
-  healthcheck:
-    test: ["CMD", "curl", "-f", "http://localhost:11235/health"]
-    interval: 30s
-    timeout: 10s
-    retries: 3
-    start_period: 40s
-
 services:
-  # Local build services for different platforms
-  crawl4ai-amd64:
+  crawl4ai:
+    # Build the image using the Dockerfile in the repo
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: .  # Use the repo root as context
+      dockerfile: Dockerfile # The main Dockerfile
       args:
-        PYTHON_VERSION: "3.10"
-        INSTALL_TYPE: ${INSTALL_TYPE:-basic}
-        ENABLE_GPU: false
+        # Ensure GPU support is ENABLED during build
+        ENABLE_GPU: "true"
+        # Specify Python version if needed, default is likely fine
+        # PYTHON_VERSION: "3.10"
+        # Choose install type if needed ('all' might be best for GPU features)
+        INSTALL_TYPE: "all"
+      # Specify the platform
       platforms:
         - linux/amd64
-    profiles: ["local-amd64"]
-    <<: *base-config  # extends yerine doğrudan yapılandırmayı dahil ettik
+    container_name: devdocs-crawl4ai-local # Give it a distinct name
+    ports:
+      - "11235:11235"
+      # Add other ports from base-config if needed (8000, 9222, 8080?)
+    environment:
+      # Set API tokens via Portainer environment variables or secrets
+      - CRAWL4AI_API_TOKEN=${CRAWL4AI_API_TOKEN:-devdocs-demo-key} # Example
+      - NVIDIA_VISIBLE_DEVICES=all # Often helpful for CUDA apps
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility # Explicitly add capabilities env var
+      # Add OPENAI_API_KEY, CLAUDE_API_KEY etc. if used by crawl4ai
+    volumes:
+      - /dev/shm:/dev/shm
+      # Mount your crawl_results relative to Portainer's data path or use a named volume
+      # Option A: Relative path (Careful with this in Portainer)
+      # - ./crawl_results:/app/crawl_results
+      # Option B: Named Volume (Recommended)
+      - crawl4ai_results:/app/crawl_results
+    networks:
+      # Connect to the same network as your other devdocs services
+      - devdocs-network
+    restart: unless-stopped
+    # --- Runtime GPU Request ---
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G
+          devices:
+            - driver: nvidia
+              device_ids: ['0'] # Or your UUID/count:all
+              capabilities: [gpu]
 
-  crawl4ai-arm64:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        PYTHON_VERSION: "3.10"
-        INSTALL_TYPE: ${INSTALL_TYPE:-basic}
-        ENABLE_GPU: false
-      platforms:
-        - linux/arm64
-    profiles: ["local-arm64"]
-    <<: *base-config
+# Define the network if deploying this standalone,
+# otherwise ensure 'devdocs-network' exists from your main stack
+networks:
+  devdocs-network:
+    external: true # Assumes the network is created by your main stack
 
-  # Hub services for different platforms and versions
-  crawl4ai-hub-amd64:
-    image: unclecode/crawl4ai:${VERSION:-basic}-amd64
-    profiles: ["hub-amd64"]
-    <<: *base-config
-
-  crawl4ai-hub-arm64:
-    image: unclecode/crawl4ai:${VERSION:-basic}-arm64
-    profiles: ["hub-arm64"]
-    <<: *base-config
+# Define the named volume if you chose Option B
+volumes:
+  crawl4ai_results:
