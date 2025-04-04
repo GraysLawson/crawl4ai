@@ -42,10 +42,10 @@ services:
           memory: 4G
         reservations:
           memory: 1G
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+        devices:
+          - driver: cdi
+            device_ids:
+              - nvidia.com/gpu=all
 
 # Define the network if deploying this standalone,
 # otherwise ensure 'devdocs-network' exists from your main stack
