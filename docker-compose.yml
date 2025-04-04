@@ -40,11 +40,12 @@ services:
       resources:
         reservations:
           devices:
-            - driver: cdi
+            - capabilities: ["gpu"]
+              driver: cdi
+              options:
+                virtualization: false
               device_ids:
                 - nvidia.com/gpu=all
-            - capabilities: ["nvidia-compute"]
-              driver: nvidia
 
 # Define the network if deploying this standalone,
 # otherwise ensure 'devdocs-network' exists from your main stack
