@@ -38,8 +38,6 @@ services:
     # --- Runtime GPU Request ---
     deploy:
       resources:
-        limits:
-          memory: 4G
         reservations:
           devices:
             - driver: cdi
