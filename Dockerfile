@@ -50,6 +50,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libjpeg-dev \
     redis-server \
     supervisor \
+    # Set python3.10 as default python3 and pip3 as default pip
     && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 \
     && update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 \
     && rm -rf /var/lib/apt/lists/*
@@ -81,14 +82,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # --- REMOVED: CUDA Toolkit Installation ---
 # The nvidia/cuda base image already includes the toolkit.
-# The following block is intentionally removed/commented out:
-# RUN if [ "$ENABLE_GPU" = "true" ] && [ "$TARGETARCH" = "amd64" ] ; then \
-#     apt-get update && apt-get install -y --no-install-recommends \
-#     nvidia-cuda-toolkit \
-#     && rm -rf /var/lib/apt/lists/* ; \
-# else \
-#     echo "Skipping NVIDIA CUDA Toolkit installation (unsupported platform or GPU disabled)"; \
-# fi
 
 # Keep platform-specific optimizations (kept from original)
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
@@ -111,14 +104,16 @@ WORKDIR ${APP_HOME}
 RUN echo '#!/bin/bash\n\
 if [ "$USE_LOCAL" = "true" ]; then\n\
     echo "📦 Installing from local source..."\n\
-    pip install --no-cache-dir /tmp/project/\n\
+    # --- FIXED: Use absolute path for pip --- \n\
+    /usr/bin/pip install --no-cache-dir /tmp/project/\n\
 else\n\
     echo "🌐 Installing from GitHub..."\n\
     for i in {1..3}; do \n\
         git clone --branch ${GITHUB_BRANCH} ${GITHUB_REPO} /tmp/crawl4ai && break || \n\
         { echo "Attempt $i/3 failed! Taking a short break... ☕"; sleep 5; }; \n\
     done\n\
-    pip install --no-cache-dir /tmp/crawl4ai\n\
+    # --- FIXED: Use absolute path for pip --- \n\
+    /usr/bin/pip install --no-cache-dir /tmp/crawl4ai\n\
 fi' > /tmp/install.sh && chmod +x /tmp/install.sh
 
 # Copy local code context for installation
@@ -129,14 +124,14 @@ COPY deploy/docker/supervisord.conf .
 COPY deploy/docker/requirements.txt .
 
 # Install base Python requirements
-RUN pip install --no-cache-dir -r requirements.txt
+# --- FIXED: Use absolute path for pip ---
+RUN /usr/bin/pip install --no-cache-dir -r requirements.txt
 
 # Install optional ML dependencies based on INSTALL_TYPE (defaulting to 'all' for GPU)
-# Note: Torch installation might benefit from specific CUDA version indexing later if needed
-# See https://pytorch.org/get-started/locally/
+# --- FIXED: Using absolute paths for python/pip to avoid PATH issues ---
 RUN if [ "$INSTALL_TYPE" = "all" ] ; then \
         echo "Installing 'all' dependencies (including torch, transformers)..." && \
-        pip install --no-cache-dir \
+        /usr/bin/pip install --no-cache-dir \
             torch \
             torchvision \
             torchaudio \
@@ -144,27 +139,29 @@ RUN if [ "$INSTALL_TYPE" = "all" ] ; then \
             nltk \
             transformers \
             tokenizers && \
-        python -m nltk.downloader punkt stopwords ; \
+        /usr/bin/python3 -m nltk.downloader punkt stopwords ; \
     fi
 
 # Install crawl4ai itself with extras based on INSTALL_TYPE
+# --- FIXED: Using absolute paths for python/pip ---
 RUN if [ "$INSTALL_TYPE" = "all" ] ; then \
-        pip install "/tmp/project/[all]" && \
-        python -m crawl4ai.model_loader ; \
+        /usr/bin/pip install "/tmp/project/[all]" && \
+        /usr/bin/python3 -m crawl4ai.model_loader ; \
     elif [ "$INSTALL_TYPE" = "torch" ] ; then \
-        pip install "/tmp/project/[torch]" ; \
+        /usr/bin/pip install "/tmp/project/[torch]" ; \
     elif [ "$INSTALL_TYPE" = "transformer" ] ; then \
-        pip install "/tmp/project/[transformer]" && \
-        python -m crawl4ai.model_loader ; \
+        /usr/bin/pip install "/tmp/project/[transformer]" && \
+        /usr/bin/python3 -m crawl4ai.model_loader ; \
     else \
-        pip install "/tmp/project" ; \
+        /usr/bin/pip install "/tmp/project" ; \
     fi
 
 # Final pip upgrade, run install script, and checks
-RUN pip install --no-cache-dir --upgrade pip && \
+# --- FIXED: Using absolute paths for python/pip ---
+RUN /usr/bin/pip install --no-cache-dir --upgrade pip && \
     /tmp/install.sh && \
-    python -c "import crawl4ai; print('✅ crawl4ai is ready to rock!')" && \
-    python -c "from playwright.sync_api import sync_playwright; print('✅ Playwright is feeling dramatic!')"
+    /usr/bin/python3 -c "import crawl4ai; print('✅ crawl4ai is ready to rock!')" && \
+    /usr/bin/python3 -c "from playwright.sync_api import sync_playwright; print('✅ Playwright is feeling dramatic!')"
 
 # Install Playwright browser dependencies
 RUN playwright install --with-deps chromium
@@ -187,4 +184,3 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 EXPOSE 6379
 # Keep original CMD
 CMD ["supervisord", "-c", "supervisord.conf"]
-    
