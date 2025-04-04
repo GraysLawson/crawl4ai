@@ -41,7 +41,6 @@ services:
         limits:
           memory: 4G
         reservations:
-          memory: 1G
           devices:
             - driver: cdi
               device_ids:
