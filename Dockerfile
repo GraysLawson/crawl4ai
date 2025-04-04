@@ -1,10 +1,13 @@
-FROM python:3.10-slim
+# --- MODIFIED: Use an official NVIDIA CUDA base image ---
+# Choose a version compatible with your host driver (565.77 supports CUDA 12.x)
+# Ubuntu 22.04 base is compatible with apt commands used below.
+FROM nvidia/cuda:12.1.1-base-ubuntu22.04
 
-# Set build arguments
+# Set build arguments (keep relevant ones)
 ARG APP_HOME=/app
 ARG GITHUB_REPO=https://github.com/unclecode/crawl4ai.git
 ARG GITHUB_BRANCH=main
-ARG USE_LOCAL=true
+ARG USE_LOCAL=true # Assuming local build context
 
 ENV PYTHONFAULTHANDLER=1 \
     PYTHONHASHSEED=random \
@@ -15,18 +18,28 @@ ENV PYTHONFAULTHANDLER=1 \
     PIP_DEFAULT_TIMEOUT=100 \
     DEBIAN_FRONTEND=noninteractive \
     REDIS_HOST=localhost \
-    REDIS_PORT=6379
+    REDIS_PORT=6379 \
+    # Set expected Python version
+    PYTHON_VERSION=3.10
 
-ARG PYTHON_VERSION=3.10
-ARG INSTALL_TYPE=default
-ARG ENABLE_GPU=false
-ARG TARGETARCH
+# Build arguments needed later in the file
+ARG INSTALL_TYPE=all # Default to 'all' for GPU builds unless overridden
+ARG ENABLE_GPU=true # Assuming GPU build based on context
+ARG TARGETARCH # Docker injects this automatically
 
 LABEL maintainer="unclecode"
 LABEL description="🔥🕷️ Crawl4AI: Open-source LLM Friendly Web Crawler & scraper"
-LABEL version="1.0"    
+LABEL version="1.0"
 
+# --- MODIFIED: Install Python 3.10 and base dependencies ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Python 3.10 and related tools
+    python3.10 \
+    python3-pip \
+    python3.10-venv \
+    python3-setuptools \
+    python3.10-dev \
+    # Original base dependencies
     build-essential \
     curl \
     wget \
@@ -34,12 +47,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     cmake \
     pkg-config \
-    python3-dev \
     libjpeg-dev \
     redis-server \
     supervisor \
+    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 \
+    && update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1 \
     && rm -rf /var/lib/apt/lists/*
 
+# Install libraries needed for Playwright/browser automation (kept from original)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     libnss3 \
@@ -64,14 +79,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libatspi2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN if [ "$ENABLE_GPU" = "true" ] && [ "$TARGETARCH" = "amd64" ] ; then \
-    apt-get update && apt-get install -y --no-install-recommends \
-    nvidia-cuda-toolkit \
-    && rm -rf /var/lib/apt/lists/* ; \
-else \
-    echo "Skipping NVIDIA CUDA Toolkit installation (unsupported platform or GPU disabled)"; \
-fi
+# --- REMOVED: CUDA Toolkit Installation ---
+# The nvidia/cuda base image already includes the toolkit.
+# The following block is intentionally removed/commented out:
+# RUN if [ "$ENABLE_GPU" = "true" ] && [ "$TARGETARCH" = "amd64" ] ; then \
+#     apt-get update && apt-get install -y --no-install-recommends \
+#     nvidia-cuda-toolkit \
+#     && rm -rf /var/lib/apt/lists/* ; \
+# else \
+#     echo "Skipping NVIDIA CUDA Toolkit installation (unsupported platform or GPU disabled)"; \
+# fi
 
+# Keep platform-specific optimizations (kept from original)
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
     echo "🦾 Installing ARM-specific optimizations"; \
     apt-get update && apt-get install -y --no-install-recommends \
@@ -88,6 +107,7 @@ fi
 
 WORKDIR ${APP_HOME}
 
+# Keep the installation script logic (might be simplified later if needed)
 RUN echo '#!/bin/bash\n\
 if [ "$USE_LOCAL" = "true" ]; then\n\
     echo "📦 Installing from local source..."\n\
@@ -101,14 +121,21 @@ else\n\
     pip install --no-cache-dir /tmp/crawl4ai\n\
 fi' > /tmp/install.sh && chmod +x /tmp/install.sh
 
+# Copy local code context for installation
 COPY . /tmp/project/
 
+# Copy config files
 COPY deploy/docker/supervisord.conf .
-
 COPY deploy/docker/requirements.txt .
+
+# Install base Python requirements
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install optional ML dependencies based on INSTALL_TYPE (defaulting to 'all' for GPU)
+# Note: Torch installation might benefit from specific CUDA version indexing later if needed
+# See https://pytorch.org/get-started/locally/
 RUN if [ "$INSTALL_TYPE" = "all" ] ; then \
+        echo "Installing 'all' dependencies (including torch, transformers)..." && \
         pip install --no-cache-dir \
             torch \
             torchvision \
@@ -120,6 +147,7 @@ RUN if [ "$INSTALL_TYPE" = "all" ] ; then \
         python -m nltk.downloader punkt stopwords ; \
     fi
 
+# Install crawl4ai itself with extras based on INSTALL_TYPE
 RUN if [ "$INSTALL_TYPE" = "all" ] ; then \
         pip install "/tmp/project/[all]" && \
         python -m crawl4ai.model_loader ; \
@@ -131,16 +159,20 @@ RUN if [ "$INSTALL_TYPE" = "all" ] ; then \
     else \
         pip install "/tmp/project" ; \
     fi
-    
+
+# Final pip upgrade, run install script, and checks
 RUN pip install --no-cache-dir --upgrade pip && \
     /tmp/install.sh && \
     python -c "import crawl4ai; print('✅ crawl4ai is ready to rock!')" && \
     python -c "from playwright.sync_api import sync_playwright; print('✅ Playwright is feeling dramatic!')"
-    
+
+# Install Playwright browser dependencies
 RUN playwright install --with-deps chromium
 
+# Copy remaining docker deployment files
 COPY deploy/docker/* ${APP_HOME}/
 
+# Keep original healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD bash -c '\
     MEM=$(free -m | awk "/^Mem:/{print \$2}"); \
@@ -151,6 +183,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     redis-cli ping > /dev/null && \
     curl -f http://localhost:8000/health || exit 1'
 
+# Expose Redis port (run by supervisord)
 EXPOSE 6379
+# Keep original CMD
 CMD ["supervisord", "-c", "supervisord.conf"]
     
